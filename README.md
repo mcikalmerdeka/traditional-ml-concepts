@@ -1,9 +1,5 @@
 # ML Fundamentals Revisited
 
-> A comprehensive guide to classical machine learning algorithms for AI engineers
-
-## 🎯 Purpose
-
 As an AI engineer working primarily with LLM providers (OpenAI, Anthropic, Google), this repository serves as my **personal reminder handbook** for classical ML algorithms. It covers theory, implementation, and practical applications.
 
 ## 🚀 Why This Repository?
