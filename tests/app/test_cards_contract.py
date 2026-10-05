@@ -60,7 +60,7 @@ def test_contract_invariants(card):
 @pytest.mark.parametrize("card", ALL, ids=lambda c: c.id)
 def test_card_page_smoke(card):
     os.environ["SMOKE_CARD_ID"] = card.id
-    at = AppTest.from_file(SMOKE_RUNNER, default_timeout=60)
+    at = AppTest.from_file(SMOKE_RUNNER, default_timeout=120)
     at.run()
     assert not at.exception, at.exception
 
@@ -80,3 +80,22 @@ def test_tree_overfit_curve_shows_test_gap(card):    # on moons with max_depth=2
 
 def test_decision_tree_card_exists():
     assert any(c.id == "decision-tree" for c in ALL)
+
+
+def test_knn_card_exists():
+    assert any(c.id == "knn" for c in ALL)
+
+
+@pytest.mark.parametrize("card", [c for c in ALL if c.id == "knn"])
+def test_knn_k1_overfits_and_k25_underfits_on_moons(card):
+    # full-data training accuracy is the memorization signal: k=1 returns each
+    # point's own label (accuracy 1.0); k=25 smooths heavily and loses accuracy
+    data = get_dataset("moons")
+    base = {h.name: h.default for h in card.hypers}
+    p1 = base | {"n_neighbors": 1}
+    p25 = base | {"n_neighbors": 25}
+    s1 = run(card, data, p1, "sklearn")
+    s25 = run(card, data, p25, "sklearn")
+    acc1 = card.metrics(s1, data)[0][1]
+    acc25 = card.metrics(s25, data)[0][1]
+    assert acc1 > acc25

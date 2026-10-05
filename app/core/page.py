@@ -103,7 +103,7 @@ def _playground(card: AlgorithmCard) -> None:
                     data, params, fitteds.get("scratch"), fitteds["sklearn"]
                 )
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)  # width defaults to "stretch"
         except Exception as exc:
             st.error(f"Visualization failed with `{params}` — `{exc}`")
 

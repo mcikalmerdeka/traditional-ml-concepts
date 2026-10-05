@@ -103,7 +103,10 @@ class AlgorithmCard:
     fit: Callable[[Data, dict, Engine], Any]  # returns the RAW fitted model
     metrics: Callable[[Fitted, Data], list[tuple[str, float]]]
     visualizations: tuple[Callable[[PlayContext], Any], ...]
+    notes: tuple[str, ...] = ()
     row_cap: int | None = None
+    grid_resolution: int = 40  # classifier meshgrid resolution (heavy scratch
+                               # learners lower this — see boundary.py)
     sklearn_only: bool = False
 
     def validate(self) -> None:
