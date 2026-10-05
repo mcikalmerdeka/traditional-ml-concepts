@@ -1,3 +1,12 @@
+import sys
+from pathlib import Path
+
+# Launch-contract bootstrap: `streamlit run` puts ONLY the script's directory
+# (app/) on sys.path — no cwd, no PYTHONPATH — so the repo root must be added
+# here, before any app.* import can resolve. ensure_root_on_path() below is
+# then a no-op safety net.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import streamlit as st
 
 from app.registry.discovery import discover_cards
