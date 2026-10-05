@@ -23,10 +23,15 @@ def resolve_hypers(hypers: tuple, values: dict) -> dict:
     return {h.name: values.get(h.name, h.default) for h in hypers}
 
 
-def render_hypers(hypers: tuple) -> dict:
-    """Render each spec to its Streamlit widget; return resolved params."""
+def render_hypers(card) -> dict:
+    """Render each of the card's params to its widget; return resolved values.
+
+    Keys are namespaced per card (`<id>::<name>`), giving every widget a
+    deterministic identity for session-state writes from test suites.
+    """
     params = {}
-    for h in hypers:
+    for h in card.hypers:
+        key = f"{card.id}::{h.name}"
         if isinstance(h, Slider):
             params[h.name] = st.sidebar.slider(
                 h.name,
@@ -35,6 +40,7 @@ def render_hypers(hypers: tuple) -> dict:
                 value=h.default,
                 step=h.step,
                 help=h.help,
+                key=key,
             )
         elif isinstance(h, Select):
             params[h.name] = st.sidebar.selectbox(
@@ -42,9 +48,12 @@ def render_hypers(hypers: tuple) -> dict:
                 options=list(h.options),
                 index=list(h.options).index(h.default),
                 help=h.help,
+                key=key,
             )
         elif isinstance(h, Toggle):
-            params[h.name] = st.sidebar.toggle(h.name, value=h.default, help=h.help)
+            params[h.name] = st.sidebar.toggle(
+                h.name, value=h.default, help=h.help, key=key
+            )
         else:
             raise TypeError(f"unknown hyperparameter spec: {h!r}")
     return params
@@ -68,11 +77,14 @@ def _render_code_section(card: AlgorithmCard) -> None:
 def _playground(card: AlgorithmCard) -> None:
     st.markdown("## Playground")
     dataset_id = st.sidebar.selectbox(
-        "Dataset", list(card.datasets), format_func=lambda s: s.replace("_", " ")
+        "Dataset",
+        list(card.datasets),
+        format_func=lambda s: s.replace("_", " "),
+        key=f"{card.id}::dataset",
     )
     data = get_dataset(dataset_id)
     st.sidebar.caption(data.note)
-    params = render_hypers(card.hypers)
+    params = render_hypers(card)
 
     engines = ["sklearn"] if card.sklearn_only else ["scratch", "sklearn"]
     fitteds: dict[str, object] = {}
