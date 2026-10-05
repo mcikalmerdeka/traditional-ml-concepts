@@ -65,9 +65,9 @@ def _boundaries(ctx):
     from app.components.scatter import labeled_scatter
 
     scratch_fig = labeled_scatter(ctx.data.X, ctx.data.y, "scratch")
-    decision_boundary(scratch_fig, ctx.scratch.predict, ctx.data.X, "scratch")
+    decision_boundary(scratch_fig, ctx.scratch.predict, ctx.data.X, "scratch", card.grid_resolution)
     sklearn_fig = labeled_scatter(ctx.data.X, ctx.data.y, "sklearn")
-    decision_boundary(sklearn_fig, ctx.sklearn.predict, ctx.data.X, "sklearn")
+    decision_boundary(sklearn_fig, ctx.sklearn.predict, ctx.data.X, "sklearn", card.grid_resolution)
 
     fig = go.Figure()
     fig.add_traces([t.update(xaxis="x", yaxis="y") for t in scratch_fig.data])
