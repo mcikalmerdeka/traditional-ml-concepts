@@ -13,11 +13,17 @@ wheels/
 uv.lock
 
 # python modules
-__init__.py
+# __init__.py
 
 # temporary ignore folders and files
 assets/
 examples/
-docs/
+# docs/
+other/
 
 ml_repo_guide.md
+
+# AXIOM
+.agents/
+.env.axiom
+opencode.json
