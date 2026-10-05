@@ -9,6 +9,7 @@ raise — the same code path an out-of-bounds k would take — while the engine
 test below proves a genuinely degenerate k does raise at the engine layer.
 """
 
+import logging
 import os
 
 import pytest
@@ -38,7 +39,7 @@ def test_degenerate_k_raises_at_engine_layer():
         run(card, get_dataset("kmeans_rings"), params, "sklearn")
 
 
-def test_fit_failure_becomes_error_and_page_stays_usable():
+def test_fit_failure_becomes_error_and_page_stays_usable(caplog):
     """Renderer contract (spec §11): a failing fit renders st.error with the
     params snapshot; the rest of the page (theory, sidebar) stays usable."""
     card = get_card("kmeans")
@@ -51,12 +52,16 @@ def test_fit_failure_becomes_error_and_page_stays_usable():
     try:
         os.environ["SMOKE_CARD_ID"] = "kmeans"
         at = AppTest.from_file(SMOKE_RUNNER, default_timeout=120)
-        at.run()
+        with caplog.at_level(logging.ERROR, logger="app.core.page"):
+            at.run()
         assert not at.exception, at.exception
         assert len(at.error) >= 1
         # params snapshot present in the error message
         assert "n_clusters" in at.error[0].value
         # page stays usable: theory section still rendered
         assert any("Theory" in md.value for md in at.markdown)
+        # spec §11: unexpected fit failures also reach the console with a
+        # traceback (not just the on-page st.error)
+        assert any(r.exc_info for r in caplog.records), caplog.text
     finally:
         object.__setattr__(card, "fit", original_fit)

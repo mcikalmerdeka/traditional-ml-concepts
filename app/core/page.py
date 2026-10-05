@@ -7,6 +7,7 @@ and figures — not theory rendering.
 """
 
 import inspect
+import logging
 
 import streamlit as st
 
@@ -14,6 +15,8 @@ from app.core.card import AlgorithmCard, PlayContext, Select, Slider, Toggle
 from app.core.datasets import get_dataset
 from app.core.engines import run
 from app.core.source_code import get_class_source
+
+logger = logging.getLogger(__name__)
 
 st.cache_data(get_dataset)  # dataset access is cached (spec §12)
 
@@ -92,6 +95,10 @@ def _playground(card: AlgorithmCard) -> None:
         for eng in engines:
             fitteds[eng] = run(card, data, params, eng)
     except Exception as exc:  # bad hyperparameter combos are a learning moment
+        # spec §11: the page stays usable AND the failure reaches the console
+        # with a traceback (st.error is the on-page half of the contract)
+        logger.exception("fit failed for card %s with params %s", card.id, params)
+        st.toast(f"Fit failed — `{exc}`. Details in the console.")
         st.error(
             f"Fit failed with `{params}` — `{exc}`. "
             "Try different hyperparameter values."
@@ -117,6 +124,9 @@ def _playground(card: AlgorithmCard) -> None:
             )
             st.plotly_chart(fig)  # width defaults to "stretch"
         except Exception as exc:
+            logger.exception(
+                "visualization failed for card %s with params %s", card.id, params
+            )
             st.error(f"Visualization failed with `{params}` — `{exc}`")
 
 
