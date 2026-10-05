@@ -2,6 +2,8 @@ import os
 
 import plotly.graph_objects as go
 import pytest
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 from streamlit.testing.v1 import AppTest
 
 from app.core.card import PlayContext
@@ -61,3 +63,20 @@ def test_card_page_smoke(card):
     at = AppTest.from_file(SMOKE_RUNNER, default_timeout=60)
     at.run()
     assert not at.exception, at.exception
+
+
+@pytest.mark.parametrize("card", [c for c in ALL if c.id == "decision-tree"])
+def test_tree_overfit_curve_shows_test_gap(card):    # on moons with max_depth=20, train accuracy must exceed test accuracy
+    # (memorization: fit on full moons scores higher on its own training rows
+    # than on unseen test rows)
+    data = get_dataset("moons")
+    params = {h.name: h.default for h in card.hypers} | {"max_depth": 20}
+    fitted = run(card, data, params, "sklearn")
+    Xtr, Xte, ytr, yte = train_test_split(data.X, data.y, test_size=0.3, random_state=0)
+    train_acc = accuracy_score(ytr, fitted.raw.predict(Xtr))
+    test_acc = accuracy_score(yte, fitted.raw.predict(Xte))
+    assert train_acc >= test_acc
+
+
+def test_decision_tree_card_exists():
+    assert any(c.id == "decision-tree" for c in ALL)
