@@ -88,7 +88,10 @@ def _scatter_by_label(ctx):
 
 
 def _silhouette_vs_k(ctx):
-    ks = list(range(2, 9))
+    # sweep covers the n_clusters slider's full range (2..10) so the
+    # "current k" marker never vanishes inside the slider's bounds
+    # (cleanup minor #6)
+    ks = list(range(2, 11))
     scores = []
     for k in ks:
         # module-level fit returns the RAW model (run() adds the Fitted wrap)
@@ -110,7 +113,7 @@ def _silhouette_vs_k(ctx):
             line=dict(color="#636EFA", width=2),
         )
     )
-    if 2 <= current <= 8:
+    if 2 <= current <= 10:
         fig.add_trace(
             go.Scatter(
                 x=[current],

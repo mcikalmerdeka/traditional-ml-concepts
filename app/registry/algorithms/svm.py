@@ -15,17 +15,17 @@ from sklearn.svm import SVC
 
 from app.core.card import AlgorithmCard, Select, Slider
 
-THEORY = """## Theory
+THEORY = r"""## Theory
 
 An SVM finds the separating boundary with the **maximum margin** — the
 half-width `2/‖w‖` between the two classes' supporting planes:
 
-$$\\max_{w,b} \\; \\frac{2}{\\|w\\|} \\\\;\\; \\text{s.t.}\\;\\; y_i(w^\\top x_i + b) \\ge 1$$
+$$\max_{w,b} \;\; \frac{2}{\|w\|} \;\; \text{s.t.}\;\; y_i(w^\top x_i + b) \ge 1$$
 
 Rows that end up on the wrong side (or inside the margin) pay a penalty —
 the **hinge loss**:
 
-$$L = \\max(0,\\; 1 - y_i (w^\\top x_i + b))$$
+$$L = \max(0,\; 1 - y_i (w^\top x_i + b))$$
 
 That relaxation is controlled by **C**. Small C → a wide margin, more train
 errors tolerated (violations are cheap); large C → a narrow margin, every
@@ -34,7 +34,7 @@ training point is nearly sacred.
 Non-linearity comes from kernels: the **RBF kernel** lets the boundary close
 around pockets of data:
 
-$$K(x, x') = e^{-\\gamma \\|x - x'\\|^2}$$
+$$K(x, x') = e^{-\gamma \|x - x'\|^2}$$
 
 **gamma** is the kernel width. Small γ → smooth, island-free regions; large γ
 → each training point spawns its own island of class 1 surrounded by the

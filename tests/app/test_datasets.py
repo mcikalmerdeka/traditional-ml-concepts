@@ -37,7 +37,9 @@ def test_shapes_and_determinism(ds_id):
 
 
 def test_clustering_sets_have_no_labels():
-    for ds_id in ("kmeans_4blobs", "kmeans_rings"):
+    # cleanup minor #4: var_blobs joins the no-label pin (unsupervised set —
+    # a labeled y here would silently change every clustering card's contract)
+    for ds_id in ("kmeans_4blobs", "kmeans_rings", "var_blobs"):
         assert get_dataset(ds_id).y is None
 
 

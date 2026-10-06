@@ -9,7 +9,6 @@ stage, so more trees keep helping — until the stages begin fitting the noise
 and the test curve turns over.
 """
 
-import numpy as np
 import plotly.graph_objects as go
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score

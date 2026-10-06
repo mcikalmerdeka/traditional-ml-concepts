@@ -44,3 +44,21 @@ def test_silhouette_excludes_noise_points():
     expected = float(silhouette_score(X[mask], labels[mask]))
     assert values["Silhouette"] == expected
 
+
+
+def test_all_noise_page_stays_usable():
+    # cleanup minor #5: page-level variant (spec §11) — eps=0.1 is IN-bounds
+    # and legal, so the page renders an all-noise lesson, not an error.
+    import os
+
+    from streamlit.testing.v1 import AppTest
+
+    from app.paths import ROOT
+
+    os.environ["SMOKE_CARD_ID"] = "dbscan"
+    at = AppTest.from_file(str(ROOT / "tests" / "app" / "smoke_runner.py"), default_timeout=120)
+    at.run()  # first run instantiates the widgets (sidebar fragment)
+    at.sidebar.slider[0].set_value(0.1)  # eps slider (key dbscan::eps)
+    at.run()
+    assert not at.exception, at.exception
+    assert len(at.error) == 0  # eps=0.1 is IN-bounds and legal — not an error, a lesson

@@ -8,7 +8,6 @@ overconfident trees, and the ensemble's boundary obeys the *mean* of
 memorizations instead of any one of them.
 """
 
-import numpy as np
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score

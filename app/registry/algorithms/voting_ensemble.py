@@ -8,7 +8,6 @@ Members are fixed (plan Decisions §4): one member per bias family — linear
 Diversity of model *classes* is the lesson; member tuning is not.
 """
 
-import numpy as np
 import plotly.graph_objects as go
 from sklearn.ensemble import VotingClassifier
 from sklearn.linear_model import LogisticRegression
@@ -75,17 +74,18 @@ def _boundary(ctx):
 
 
 def _member_vs_ensemble(ctx):
-    # refit the 3 members + the ensemble: the ensemble vs its own bench
+    # refit the 3 members (they have no context); the ensemble row REUSES
+    # ctx.sklearn — the page already fit exactly this model, refitting it
+    # wastes work and would double-count randomness (cleanup minor #7)
     members = [
         ("lr (linear)", LogisticRegression(max_iter=1000)),
         ("tree (depth 3)", DecisionTreeClassifier(max_depth=3, random_state=0)),
         ("knn (5)", KNeighborsClassifier(n_neighbors=5)),
     ]
-    ensemble = fit(ctx.data, ctx.params, "sklearn")
     names = [name for name, _ in members] + ["ensemble"]
     accs = [float(accuracy_score(ctx.data.y, m.fit(ctx.data.X, ctx.data.y).predict(ctx.data.X)))
             for _, m in members]
-    accs.append(float(accuracy_score(ctx.data.y, ensemble.predict(ctx.data.X))))
+    accs.append(float(accuracy_score(ctx.data.y, ctx.sklearn.predict(ctx.data.X))))
 
     fig = go.Figure(
         go.Bar(

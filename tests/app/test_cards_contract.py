@@ -11,7 +11,7 @@ from app.core.card import PlayContext
 from app.core.datasets import get_dataset
 from app.core.engines import run
 from app.paths import ROOT
-from app.registry.discovery import all_cards
+from app.registry.discovery import all_cards, get_card
 
 ALL = all_cards()
 
@@ -162,3 +162,52 @@ def test_fit_is_deterministic(card):
         return f.raw.labels_
 
     assert np.array_equal(out(a), out(b))
+
+
+@pytest.mark.parametrize("card", [c for c in ALL if c.id == "svm"])
+def test_svm_theory_has_no_latex_row_break(card):
+    # cleanup minor #2: the hard-margin formula once rendered with an
+    # unintended LaTeX row break (\\;) — the theory string must contain none
+    assert "\\\\" not in card.theory
+
+
+@pytest.mark.parametrize("card", [c for c in ALL if c.id == "hierarchical-clustering"])
+def test_hierarchical_marker_reaches_slider_top(card):
+    # cleanup minor #6: the silhouette sweep must cover the slider's full
+    # range (2..10) so the "current k" marker never vanishes
+    data = get_dataset("kmeans_4blobs")
+    params = {h.name: h.default for h in card.hypers} | {"n_clusters": 10}
+    fitteds = {e: run(card, data, params, e) for e in ["sklearn"]}
+    from app.core.card import PlayContext
+    ctx = PlayContext(data, params, None, fitteds["sklearn"])
+    fig = card.visualizations[1](ctx)
+    marker = fig.data[-1]
+    assert list(marker.x) == [10]
+
+
+def test_voting_ensemble_reuses_context_fit():
+    # cleanup minor #7: the member-vs-ensemble viz must reuse ctx.sklearn for
+    # the ensemble row, refitting only the three members — patch the module
+    # the viz's bare `fit(...)` call resolves against (module-global, NOT the
+    # frozen card attribute — different call path than the Task-3 page patch;
+    # ledger ruling Task 5). If the viz still refits the ensemble, boom raises.
+    import sys as _sys
+
+    card = get_card("voting-ensemble")
+    data = get_dataset("moons")
+    params = {h.name: h.default for h in card.hypers}
+    sklearn_fit = run(card, data, params, "sklearn")
+    module = _sys.modules["app_cards_voting_ensemble"]
+    original = module.fit  # card.fit is this same function (verified)
+
+    def boom(data, params, engine):
+        raise AssertionError("viz must reuse ctx.sklearn, not refit")
+
+    module.fit = boom
+    from app.core.card import PlayContext
+    try:
+        ctx = PlayContext(data, params, None, sklearn_fit)
+        card.visualizations[1](ctx)  # must not refit the ensemble
+    finally:
+        module.fit = original
+from app.registry.discovery import get_card
