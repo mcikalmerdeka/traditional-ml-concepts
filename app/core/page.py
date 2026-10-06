@@ -135,7 +135,9 @@ def render_card(card: AlgorithmCard) -> None:
     st.badge(card.family)
     st.markdown(f"**When to use:** {card.when_to_use}")
 
-    st.markdown("## Theory")
+    # no "## Theory" header here — the card's theory string is self-contained
+    # (spec §7) and starts with its own "## Theory"; printing one here
+    # duplicated the heading on every card page (user-reported)
     st.markdown(card.theory)
 
     _render_code_section(card)

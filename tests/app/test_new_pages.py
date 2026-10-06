@@ -60,3 +60,19 @@ def test_reference_page_smoke_boots_and_lists_every_card():
     at = AppTest.from_file(REFERENCE_PAGE, default_timeout=60)
     at.run()
     assert not at.exception, at.exception
+
+
+def test_card_page_renders_theory_heading_once():
+    # user-reported (acceptance): the renderer printed "## Theory" AND every
+    # card's self-contained theory string starts with its own "## Theory"
+    # (spec §7: theory is "markdown + LaTeX, self-contained") — the heading
+    # must appear exactly once per card page. Both occurrences start a
+    # markdown element with the heading: the renderer's bare element and the
+    # theory block's first line — count elements that START with it.
+    import os
+
+    os.environ["SMOKE_CARD_ID"] = "linear-regression"
+    at = AppTest.from_file(str(ROOT / "tests" / "app" / "smoke_runner.py"), default_timeout=120)
+    at.run()
+    assert not at.exception, at.exception
+    assert sum(1 for md in at.markdown if md.value.lstrip().startswith("## Theory")) == 1
