@@ -54,7 +54,14 @@ def metrics(fitted, data):
         ("Noise", float((labels == -1).mean())),
     ]
     if n_clusters >= 2:
-        values.append(("Silhouette", float(silhouette_score(data.X, labels))))
+        # silhouette on non-noise rows only: scattered noise must not pose
+        # as a pseudo "-1 cluster" (basis matches the sibling clustering
+        # pages). mask.sum() > n_clusters keeps sklearn's 2 <= n_labels <
+        # n_samples precondition — the all-singleton-clusters edge would
+        # otherwise raise.
+        mask = labels != -1
+        if mask.sum() > n_clusters:
+            values.append(("Silhouette", float(silhouette_score(data.X[mask], labels[mask]))))
     return values
 
 

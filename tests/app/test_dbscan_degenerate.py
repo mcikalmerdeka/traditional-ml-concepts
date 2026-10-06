@@ -6,6 +6,10 @@ form. The card must degrade gracefully there — metrics return a value (no
 crash, no NaN) and the page stays usable (spec §11).
 """
 
+import numpy as np
+from sklearn.metrics import silhouette_score
+
+from app.core.card import Data
 from app.core.datasets import get_dataset
 from app.core.engines import run
 from app.registry.discovery import get_card
@@ -17,3 +21,26 @@ def test_all_noise_combo_degrades_gracefully():
     fitted = run(card, get_dataset("kmeans_rings"), params, "sklearn")
     values = dict(card.metrics(fitted, get_dataset("kmeans_rings")))
     assert values["Clusters"] == 0.0  # every point is noise; no crash, no NaN
+
+
+def test_silhouette_excludes_noise_points():
+    # final-review Important #2: scattered noise must not pose as a
+    # pseudo-"cluster -1" inside the headline silhouette — the metric's basis
+    # must match the sibling clustering pages (non-noise rows only)
+    X = np.array(
+        [[0, 0], [0, 0.4], [0.4, 0], [10, 10], [10, 10.4], [10.4, 10], [5, 5]],
+        dtype=float,
+    )
+    data = Data(X=X, y=None, note="pin — two dense blobs + one isolated point",
+                family="clustering")
+    card = get_card("dbscan")
+    params = {h.name: h.default for h in card.hypers} | {"eps": 0.9, "min_samples": 2}
+    fitted = run(card, data, params, "sklearn")
+    labels = fitted.raw.labels_
+    assert -1 in labels  # the isolated point is noise
+    assert len(set(labels)) - (1 if -1 in labels else 0) == 2  # two real clusters
+    values = dict(card.metrics(fitted, data))
+    mask = labels != -1
+    expected = float(silhouette_score(X[mask], labels[mask]))
+    assert values["Silhouette"] == expected
+

@@ -82,6 +82,41 @@ def metrics(fitted, data):
 def _overlay(ctx):
     from app.components.scatter import labeled_scatter
 
+    if ctx.data.X.shape[1] >= 2:
+        # ≥2 features: a line over an x₀-sorted scatter zigzags (predictions
+        # depend on both features) — show predicted-vs-actual instead, the
+        # fit view that works for any feature count
+        fig = go.Figure()
+        for name, fit_obj, color in [
+            ("scratch", ctx.scratch, "#EF553B"),
+            ("sklearn", ctx.sklearn, "#636EFA"),
+        ]:
+            if fit_obj is None:
+                continue
+            pred = fit_obj.predict(ctx.data.X)
+            fig.add_trace(
+                go.Scatter(
+                    x=pred,
+                    y=ctx.data.y,
+                    mode="markers",
+                    name=name,
+                    marker=dict(size=6, color=color, opacity=0.7),
+                )
+            )
+        lo = float(min(ctx.data.y.min(), fig.data[0].x.min()))
+        hi = float(max(ctx.data.y.max(), fig.data[0].x.max()))
+        fig.add_shape(
+            type="line", x0=lo, y0=lo, x1=hi, y1=hi,
+            line=dict(color="gray", dash="dot", width=1),
+        )
+        fig.update_layout(
+            title="Predicted vs actual — the diagonal is the perfect fit; off-diagonal is error",
+            template="plotly_white",
+            xaxis_title="predicted",
+            yaxis_title="actual",
+        )
+        return fig
+
     fig = labeled_scatter(ctx.data.X, ctx.data.y, "Fit overlay — scratch vs sklearn")
     order = np.argsort(ctx.data.X[:, 0])
     X_sorted = ctx.data.X[order]
