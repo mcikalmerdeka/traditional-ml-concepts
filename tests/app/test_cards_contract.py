@@ -110,6 +110,10 @@ def test_hierarchical_clustering_card_exists():
     assert any(c.id == "hierarchical-clustering" for c in ALL)
 
 
+def test_dbscan_card_exists():
+    assert any(c.id == "dbscan" for c in ALL)
+
+
 @pytest.mark.parametrize("card", [c for c in ALL if c.id == "knn"])
 def test_knn_k1_overfits_and_k25_underfits_on_moons(card):
     # full-data training accuracy is the memorization signal: k=1 returns each
