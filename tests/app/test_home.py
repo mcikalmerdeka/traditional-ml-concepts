@@ -63,11 +63,12 @@ def test_home_launches_under_streamlit_sys_path_contract(tmp_path):
 
 
 def test_slice1_cards_all_present():
-    # nav completeness is guaranteed by construction in Home.py (nav list is
-    # built from discover_cards()); assert the source of truth directly
+    # slice-2 in flight: discovery now grows with each authored card, so the
+    # nav gate is set-INCLUSION until Task 12 restores the strict 14-id set
+    # (see SDD ledger ruling, task 2)
     from app.registry.discovery import all_cards
 
-    assert {c.id for c in all_cards()} == {
+    assert {c.id for c in all_cards()} >= {
         "linear-regression",
         "decision-tree",
         "knn",
