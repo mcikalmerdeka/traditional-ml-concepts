@@ -146,7 +146,7 @@ card = AlgorithmCard(
         Slider("alpha", 0.0, 5.0, 0.2, 1.0, "regularization strength (ridge/lasso only)"),
         Toggle("fit_intercept", True, "include bias term b"),
     ),
-    datasets=("lin_clean_1f", "lin_noisy_1f", "lin_outliers_1f"),
+    datasets=("lin_clean_1f", "lin_noisy_1f", "lin_outliers_1f", "lin_2f"),
     fit=fit,
     metrics=metrics,
     visualizations=(_overlay, _residuals),

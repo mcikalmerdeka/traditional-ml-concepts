@@ -9,11 +9,15 @@ def test_all_ids_present():
         "lin_clean_1f",
         "lin_noisy_1f",
         "lin_outliers_1f",
+        "lin_2f",
         "moons",
         "circles",
         "lin_separable",
+        "blobs_noisy",
         "kmeans_4blobs",
         "kmeans_rings",
+        "var_blobs",
+        "pca_correlated_4f",
     }
 
 
@@ -35,3 +39,7 @@ def test_shapes_and_determinism(ds_id):
 def test_clustering_sets_have_no_labels():
     for ds_id in ("kmeans_4blobs", "kmeans_rings"):
         assert get_dataset(ds_id).y is None
+
+
+def test_dim_reduction_sets_have_no_labels():
+    assert get_dataset("pca_correlated_4f").y is None

@@ -71,15 +71,51 @@ def _kmeans_rings() -> Data:
     return Data(X=X, y=None, note="concentric rings — where K-Means fails", family="clustering")
 
 
+def _lin_2f() -> Data:
+    rng = np.random.default_rng(0)
+    X = rng.uniform(-3, 3, size=(160, 2))
+    y = 2 * X[:, 0] - 1.5 * X[:, 1] + 1 + rng.normal(0, 0.5, 160)
+    return Data(X=X, y=y, family="regression",
+                note="two features — both engines should recover w ≈ (2.0, −1.5)")
+
+
+def _blobs_noisy() -> Data:
+    X, y = make_blobs(n_samples=240, centers=3, cluster_std=2.2, random_state=0)
+    return Data(X=X, y=y, family="classification",
+                note="three overlapping classes — no clean boundary, watch engines disagree")
+
+
+def _var_blobs() -> Data:
+    X, _ = make_blobs(n_samples=300, centers=[(-2, -2), (2, -2), (0, 2.5)],
+                      cluster_std=[0.4, 0.4, 2.0], random_state=0)
+    return Data(X=X, y=None, family="clustering",
+                note="unequal cluster spreads — density and variance assumptions show")
+
+
+def _pca_correlated_4f() -> Data:
+    rng = np.random.default_rng(0)
+    cov = np.array([[1.0, 0.9, 0.7, 0.4],
+                    [0.9, 1.0, 0.8, 0.5],
+                    [0.7, 0.8, 1.0, 0.6],
+                    [0.4, 0.5, 0.6, 1.0]])
+    X = rng.multivariate_normal(np.zeros(4), cov, size=240)
+    return Data(X=X, y=None, family="dimensionality-reduction",
+                note="four correlated features — two components should capture most variance")
+
+
 _REGISTRY = {
     "lin_clean_1f": _lin_clean_1f,
     "lin_noisy_1f": _lin_noisy_1f,
     "lin_outliers_1f": _lin_outliers_1f,
+    "lin_2f": _lin_2f,
     "moons": _moons,
     "circles": _circles,
     "lin_separable": _lin_separable,
+    "blobs_noisy": _blobs_noisy,
     "kmeans_4blobs": _kmeans_4blobs,
     "kmeans_rings": _kmeans_rings,
+    "var_blobs": _var_blobs,
+    "pca_correlated_4f": _pca_correlated_4f,
 }
 
 _DATASETS: dict[str, Data] = {k: f() for k, f in _REGISTRY.items()}
