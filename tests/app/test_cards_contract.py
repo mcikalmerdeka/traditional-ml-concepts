@@ -94,6 +94,10 @@ def test_svm_card_exists():
     assert any(c.id == "svm" for c in ALL)
 
 
+def test_random_forest_card_exists():
+    assert any(c.id == "random-forest" for c in ALL)
+
+
 @pytest.mark.parametrize("card", [c for c in ALL if c.id == "knn"])
 def test_knn_k1_overfits_and_k25_underfits_on_moons(card):
     # full-data training accuracy is the memorization signal: k=1 returns each
