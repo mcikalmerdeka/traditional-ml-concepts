@@ -10,6 +10,7 @@ from streamlit.testing.v1 import AppTest
 from app.paths import ROOT
 
 COMPARE_PAGE = str(ROOT / "app" / "compare_page.py")
+REFERENCE_PAGE = str(ROOT / "app" / "reference_page.py")
 
 
 def test_compare_page_smoke_boots_without_exception():
@@ -53,3 +54,9 @@ def test_compare_row_fit_failure_leaves_page_usable(caplog):
         assert any(r.exc_info for r in caplog.records), caplog.text
     finally:
         object.__setattr__(lin, "fit", original)
+
+
+def test_reference_page_smoke_boots_and_lists_every_card():
+    at = AppTest.from_file(REFERENCE_PAGE, default_timeout=60)
+    at.run()
+    assert not at.exception, at.exception
