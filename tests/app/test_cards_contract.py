@@ -1,5 +1,6 @@
 import os
 
+import numpy as np
 import plotly.graph_objects as go
 import pytest
 from sklearn.metrics import accuracy_score
@@ -139,3 +140,25 @@ def test_knn_k1_overfits_and_k25_underfits_on_moons(card):
     acc1 = card.metrics(s1, data)[0][1]
     acc25 = card.metrics(s25, data)[0][1]
     assert acc1 > acc25
+
+
+@pytest.mark.parametrize("card", ALL, ids=lambda c: c.id)
+def test_fit_is_deterministic(card):
+    # sklearn param drift / nondeterminism: identical fits must agree exactly
+    # (Review Focus #3 — RF/GB bootstrap, MLP adam all pin random_state=0)
+    data = get_dataset(card.datasets[0])
+    params = {h.name: h.default for h in card.hypers}
+    a = run(card, data, params, "sklearn")
+    b = run(card, data, params, "sklearn")
+
+    def out(f):
+        # kind-aware accessor (task-12 ruling): transform family reads
+        # .transform; predictive families read .predict; clustering cards
+        # are transductive — no predict exists, so read raw labels_.
+        if f.kind == "transform":
+            return f.transform(data.X)
+        if hasattr(f.raw, "predict"):
+            return f.predict(data.X)
+        return f.raw.labels_
+
+    assert np.array_equal(out(a), out(b))

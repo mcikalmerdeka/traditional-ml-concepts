@@ -62,15 +62,24 @@ def test_home_launches_under_streamlit_sys_path_contract(tmp_path):
     assert "BOOT-OK" in proc.stdout
 
 
-def test_slice1_cards_all_present():
-    # slice-2 in flight: discovery now grows with each authored card, so the
-    # nav gate is set-INCLUSION until Task 12 restores the strict 14-id set
-    # (see SDD ledger ruling, task 2)
+def test_all_cards_present():
+    # slice 2 complete: nav completeness restored to strict equality over all
+    # 14 spec cards (task-2 ruling relaxed this to inclusion mid-slice)
     from app.registry.discovery import all_cards
 
-    assert {c.id for c in all_cards()} >= {
+    assert {c.id for c in all_cards()} == {
         "linear-regression",
         "decision-tree",
         "knn",
         "kmeans",
+        "logistic-regression",
+        "svm",
+        "random-forest",
+        "gradient-boosting",
+        "naive-bayes",
+        "hierarchical-clustering",
+        "dbscan",
+        "pca",
+        "neural-network",
+        "voting-ensemble",
     }
