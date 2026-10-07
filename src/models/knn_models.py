@@ -39,6 +39,7 @@ class KNNClassifierScratch:
         self.weights = weights
         self.X_train = None
         self.y_train = None
+        self.classes_ = None
     
     def _euclidean_distance(self, x1: np.ndarray, x2: np.ndarray) -> float:
         """Calculate Euclidean distance between two points."""
@@ -76,6 +77,8 @@ class KNNClassifierScratch:
         """
         self.X_train = np.asarray(X)
         self.y_train = np.asarray(y)
+        # sorted labels: predict_proba columns follow this order (sklearn parity)
+        self.classes_ = np.unique(self.y_train)
         return self
     
     def _predict_single(self, x: np.ndarray) -> int:
@@ -145,10 +148,11 @@ class KNNClassifierScratch:
             k_nearest_labels = self.y_train[k_indices]
             
             if self.weights == 'uniform':
-                # Count votes for each class
+                # Count votes for each class (column = sorted classes_ index,
+                # NOT the raw label value — labels may be non-contiguous)
                 proba = np.zeros(n_classes)
                 for label in k_nearest_labels:
-                    proba[label] += 1
+                    proba[np.searchsorted(self.classes_, label)] += 1
                 proba /= self.n_neighbors
             else:  # distance weighted
                 k_distances = np.array([distances[i] for i in k_indices])
@@ -156,7 +160,7 @@ class KNNClassifierScratch:
                 
                 proba = np.zeros(n_classes)
                 for label, weight in zip(k_nearest_labels, weights):
-                    proba[label] += weight
+                    proba[np.searchsorted(self.classes_, label)] += weight
                 proba /= np.sum(proba)
             
             probabilities.append(proba)

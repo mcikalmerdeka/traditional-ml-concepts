@@ -31,7 +31,7 @@ Two cross-cutting pages sit alongside the cards in the sidebar:
 
 ### Engine status
 
-Four cards currently run both engines; the rest run scikit-learn alone until their scratch twin lands in `src/models/`. Upgrading a card is a one-file edit — the app discovers it automatically.
+Four cards currently run both engines; the rest run scikit-learn alone until their card is upgraded to point at the scratch twin in `src/models/` (all nine twins now exist). Upgrading a card is a one-file edit — the app discovers it automatically.
 
 | Algorithm | Family | Engines |
 |---|---|---|
@@ -63,13 +63,19 @@ Numbered in a intended reading order:
 
 ## From-scratch implementations
 
-`src/models/` currently holds:
+`src/models/` holds a scratch twin for every algorithm the app and notebooks study:
 
 - `linear_models.py` — `LinearRegressionScratch`, `RidgeRegressionScratch`, `LassoRegressionScratch`, `LogisticRegressionScratch`
 - `tree_models.py` — `DecisionTreeClassifierScratch`, `DecisionTreeRegressorScratch`
 - `knn_models.py` — `KNNClassifierScratch`, `KNNRegressorScratch`
+- `ensemble_models.py` — `RandomForestClassifierScratch`, `RandomForestRegressorScratch`, `GradientBoostingClassifierScratch`, `VotingEnsembleClassifierScratch`
+- `svm_models.py` — `SVMClassifierScratch` (simplified SMO; linear/rbf/poly kernels)
+- `naive_bayes_models.py` — `GaussianNaiveBayesScratch`
+- `neural_network_models.py` — `MLPClassifierScratch` (adam, full-batch)
+- `clustering_models.py` — `KMeansScratch`, `DBSCANScratch`, `AgglomerativeClusteringScratch` (four linkages)
+- `dimensionality_reduction.py` — `PCAScratch`
 
-`clustering_models.py`, `svm_models.py`, `ensemble_models.py`, and `dimensionality_reduction.py` are placeholders reserved for the scratch twins of the sklearn-only cards above. `src/utils/` carries shared evaluation, preprocessing, hyperparameter-tuning, and visualization helpers.
+`src/utils/` carries shared evaluation, preprocessing, hyperparameter-tuning, and visualization helpers. Every class mirrors its scikit-learn counterpart's API (constructor hyperparameters, `fit`/`predict`/`transform`, fitted attribute names like `labels_`, `cluster_centers_`, `explained_variance_ratio_`) so the Streamlit app can fit both engines through one code path; each module documents its deliberate simplifications vs. sklearn. Behavioral tests live in `tests/models/`.
 
 ## Concept guides
 
@@ -110,7 +116,7 @@ The app layer has a contract and smoke suite:
 uv run pytest tests/app
 ```
 
-153 passed, 10 skipped at merge. The skips are the scratch-engine contract checks for sklearn-only cards. Everything is deterministic — fixed seeds, no network — and a broken card fails in seconds at discovery rather than mid-session.
+153 passed, 10 skipped at merge. The skips are the scratch-engine contract checks for sklearn-only cards (all nine scratch twins exist in `src/models/` — the 10 model modules carry their own suite under `tests/models/`). Everything is deterministic — fixed seeds, no network — and a broken card fails in seconds at discovery rather than mid-session.
 
 ## Scope
 

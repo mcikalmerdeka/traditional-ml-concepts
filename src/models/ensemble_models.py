@@ -4,6 +4,8 @@ Ensemble methods implemented from scratch using NumPy.
 Includes:
 - RandomForestClassifierScratch: Random Forest for classification
 - RandomForestRegressorScratch: Random Forest for regression
+- GradientBoostingClassifierScratch: Gradient Boosting for classification
+- VotingEnsembleClassifierScratch: hard/soft voting over heterogeneous members
 
 Random Forest (Breiman, 2001) = bagging + random feature subsampling:
 each tree fits a bootstrap sample of the rows, and at every node only a
@@ -11,10 +13,17 @@ random subset of the features (``max_features``) is considered for the
 best split. The two sources of randomness decorrelate the trees, and
 averaging/voting over them reduces variance far below a single tree.
 
+Gradient Boosting (Friedman, 2001) is the variance-reducing method's
+opposite: a stagewise additive model F_m = F_{m-1} + nu * h_m where each
+tree fits the negative gradient of the loss (residuals for squared error,
+y - p for log-loss) and nu (``learning_rate``) shrinks every step.
+
+Voting merges independently trained members of different bias families by
+label majority (hard) or averaged probabilities (soft).
+
 Base learners are the scratch decision trees from ``tree_models.py``,
-extended here with per-node feature subsampling and per-split recording
-(needed for feature importances). ``Gradient Boosting`` and other
-ensemble methods remain placeholders for future work.
+extended there with per-leaf ``proba`` storage and an ``apply`` accessor;
+the forest adds per-node feature subsampling via ``_RandomFeatureSplitMixin``.
 
 Simplifications vs. scikit-learn (documented on purpose):
 - ``predict_proba`` returns the fraction of trees voting for each class,
@@ -23,9 +32,13 @@ Simplifications vs. scikit-learn (documented on purpose):
   recipe (per-tree normalized, then averaged across trees) but weight
   by node sample counts only.
 - Single-threaded: no ``n_jobs`` parallelism.
+- Gradient boosting refits each stage's trees on gradient residuals and
+  (like sklearn) then replaces leaf values with the Newton step per leaf,
+  but skips Friedman's line search, subsample<1.0, and histogram trees.
 """
 
-from typing import Optional, Union
+from copy import deepcopy
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -530,3 +543,414 @@ class RandomForestRegressorScratch:
         ss_res = np.sum((y[covered] - y_pred) ** 2)
         ss_tot = np.sum((y[covered] - np.mean(y[covered])) ** 2)
         self.oob_score_ = float(1 - ss_res / ss_tot)
+
+
+# --- Gradient Boosting (classifier) ------------------------------------------
+
+
+class GradientBoostingClassifierScratch:
+    """
+    Gradient Boosting classifier from scratch.
+
+    A stagewise additive model: start from an initial guess F0 (log-odds of
+    the base rate for binary, log class priors for multiclass) and grow
+
+        F_m(x) = F_{m-1}(x) + learning_rate * h_m(x)
+
+    where each regression tree h_m fits the negative gradient of the loss —
+    the residuals y - p for log-loss. As in scikit-learn, after a tree is
+    fitted on the raw gradient its leaf values are replaced with the Newton
+    step per leaf (sum of gradients / sum of second derivatives), which uses
+    the loss's curvature to size each leaf's update.
+
+    Binary problems stage ONE stump-tree per iteration on the log-odds;
+    multiclass problems stage K trees per iteration (softmax deviance), one
+    per class.
+
+    Parameters:
+        n_estimators: Number of boosting stages
+        learning_rate: Shrinkage applied to every tree's contribution (nu)
+        max_depth: Maximum depth of each stage's regression tree
+        min_samples_split: Minimum samples required to split a node
+        min_samples_leaf: Minimum samples required in a leaf node
+        random_state: Accepted for API parity; unused — no stochastic
+            subsampling is implemented (sklearn's ``subsample`` is always 1.0)
+
+    Attributes after fit:
+        classes_: Sorted unique class labels
+        estimators_: List over stages; stage m holds the K regression trees
+            fitted at that stage (1 tree for binary, one per class otherwise)
+        loss_curve_: Not tracked (sklearn's per-stage train deviance is
+            out of scope here)
+    """
+
+    _LOGIT_CLIP = 30.0  # sigmoid/softmax inputs beyond +-30 are numerically saturated
+
+    def __init__(
+        self,
+        n_estimators: int = 100,
+        learning_rate: float = 0.1,
+        max_depth: int = 3,
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
+        random_state: Optional[int] = None,
+    ):
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.random_state = random_state
+
+    def _check_params(self) -> None:
+        if not (isinstance(self.n_estimators, int) and self.n_estimators >= 1):
+            raise ValueError(
+                f"n_estimators must be a positive int; got {self.n_estimators!r}"
+            )
+        if not (self.learning_rate > 0):
+            raise ValueError(
+                f"learning_rate must be > 0; got {self.learning_rate!r}"
+            )
+        if not (isinstance(self.max_depth, int) and self.max_depth >= 1):
+            raise ValueError(f"max_depth must be a positive int; got {self.max_depth!r}")
+
+    def _base_tree(self) -> DecisionTreeRegressorScratch:
+        """The regression tree fitted to a stage's gradient residuals."""
+        return DecisionTreeRegressorScratch(
+            max_depth=self.max_depth,
+            min_samples_split=self.min_samples_split,
+            min_samples_leaf=self.min_samples_leaf,
+        )
+
+    @classmethod
+    def _newton_leaf_values(
+        cls,
+        tree: DecisionTreeRegressorScratch,
+        X: np.ndarray,
+        grad: np.ndarray,
+        second: np.ndarray,
+    ) -> None:
+        """
+        Overwrite the fitted tree's leaf values with the loss's Newton step.
+
+        A tree fitted by least squares on the gradient has leaf means; the
+        log/deviance losses instead want each leaf's Taylor step
+        = sum(grad) / sum(second). Grouping samples by leaf needs the tree's
+        ``apply`` accessor (leaf Node references).
+        """
+        leaves = tree.apply(X)
+        buckets: dict = {}
+        for i, leaf in enumerate(leaves):
+            buckets.setdefault(id(leaf), []).append(i)
+        for indices in buckets.values():
+            idx = np.asarray(indices)
+            numer = float(grad[idx].sum())
+            denom = float(second[idx].sum())
+            # pure leaves carry no gradient mass; the floor only prevents 0/0
+            leaves[idx[0]].value = float(numer / max(denom, 1e-12))
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "GradientBoostingClassifierScratch":
+        """
+        Fit the stagewise additive model.
+
+        Parameters:
+            X: Training features of shape (n_samples, n_features)
+            y: Class labels of shape (n_samples,)
+
+        Returns:
+            self
+        """
+        self._check_params()
+
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y)
+        n_samples = X.shape[0]
+
+        self.classes_ = np.unique(y)
+        y_idx = np.searchsorted(self.classes_, y)
+        n_classes = len(self.classes_)
+
+        # A single training class: the trivial constant classifier (sklearn
+        # would raise here; the teaching surfaces prefer a working model).
+        if n_classes == 1:
+            self.estimators_ = []
+            self._single_class = True
+            return self
+        self._single_class = False
+
+        self.estimators_ = []
+
+        if n_classes == 2:
+            # F0: log-odds of the positive class's base rate
+            pos_rate = float(np.clip((y_idx == 1).mean(), 1e-15, 1 - 1e-15))
+            self._f0_logit = float(np.log(pos_rate / (1 - pos_rate)))
+            F = np.full(n_samples, self._f0_logit)
+
+            for _ in range(self.n_estimators):
+                p = self._sigmoid(F)
+                grad = y_idx.astype(float) - p       # negative log-loss gradient
+                second = p * (1.0 - p)               # its curvature
+
+                tree = self._base_tree().fit(X, grad)
+                self._newton_leaf_values(tree, X, grad, second)
+                F += self.learning_rate * tree.predict(X)
+
+                self.estimators_.append([tree])
+        else:
+            # F0: log class priors (a zero-mass prior floors at a safe eps;
+            # prior sums stay 1 — only absent classes are floored)
+            prior = np.bincount(y_idx, minlength=n_classes) / n_samples
+            self._class_prior = prior
+            F = np.tile(np.log(np.maximum(prior, 1e-15)), (n_samples, 1))
+
+            onehot = np.eye(n_classes)[y_idx]
+            for _ in range(self.n_estimators):
+                P = self._softmax(np.clip(F, -self._LOGIT_CLIP, self._LOGIT_CLIP))
+                stage = []
+                for k in range(n_classes):
+                    grad = onehot[:, k] - P[:, k]    # negative gradient, class k
+                    second = P[:, k] * (1.0 - P[:, k])
+
+                    tree = self._base_tree().fit(X, grad)
+                    self._newton_leaf_values(tree, X, grad, second)
+                    F[:, k] += self.learning_rate * tree.predict(X)
+
+                    stage.append(tree)
+                self.estimators_.append(stage)
+
+        return self
+
+    @staticmethod
+    def _sigmoid(logits: np.ndarray) -> np.ndarray:
+        """Logistic function, clipped input keeps exp() in float64 range."""
+        clipped = np.clip(logits, -30.0, 30.0)
+        return 1.0 / (1.0 + np.exp(-clipped))
+
+    @staticmethod
+    def _softmax(logits: np.ndarray) -> np.ndarray:
+        """Row-wise softmax, max-shifted for numerical stability."""
+        shifted = logits - logits.max(axis=-1, keepdims=True)
+        e = np.exp(shifted)
+        return e / e.sum(axis=-1, keepdims=True)
+
+    def _decision(self, X: np.ndarray) -> np.ndarray:
+        """
+        Replay the staged model over raw features -> the score F.
+
+        Binary problems get a 1-D log-odds vector; multiclass problems get
+        the (n_samples, n_classes) matrix whose softmax IS the model.
+        """
+        X = np.asarray(X, dtype=float)
+        n_samples = X.shape[0]
+
+        if self._single_class:
+            return np.zeros(n_samples)
+
+        n_classes = len(self.classes_)
+        if n_classes == 2:
+            F = np.full(n_samples, self._f0_logit)
+            for stage in self.estimators_:
+                for tree in stage:
+                    F += self.learning_rate * tree.predict(X)
+            return F
+
+        F = np.tile(
+            np.log(np.maximum(self._class_prior, 1e-15)), (n_samples, 1)
+        )
+        for stage in self.estimators_:
+            for k, tree in enumerate(stage):
+                F[:, k] += self.learning_rate * tree.predict(X)
+        return F
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """
+        Class probabilities from the staged model.
+
+        Parameters:
+            X: Features of shape (n_samples, n_features)
+
+        Returns:
+            Probabilities of shape (n_samples, n_classes)
+        """
+        X = np.asarray(X, dtype=float)
+
+        if self._single_class:
+            return np.ones((len(X), 1))
+
+        F = self._decision(X)
+        if len(self.classes_) == 2:
+            p1 = self._sigmoid(F)
+            return np.column_stack([1.0 - p1, p1])
+        return self._softmax(np.clip(F, -self._LOGIT_CLIP, self._LOGIT_CLIP))
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Predict class labels by the staged model's argmax.
+
+        Parameters:
+            X: Features of shape (n_samples, n_features)
+
+        Returns:
+            Predicted class labels of shape (n_samples,)
+        """
+        proba = self.predict_proba(X)
+        return self.classes_[proba.argmax(axis=1)]
+
+    def score(self, X: np.ndarray, y: np.ndarray) -> float:
+        """Accuracy on the given data."""
+        return float(np.mean(self.predict(X) == np.asarray(y)))
+
+
+# --- Voting Ensemble (classifier) --------------------------------------------
+
+
+class VotingEnsembleClassifierScratch:
+    """
+    Hard/soft voting classifier over heterogeneous SciKit-style members.
+
+    Trains a panel of models (each given as a ``(name, estimator)`` template
+    tuple, like sklearn's ``VotingClassifier``) on fresh copies and merges
+    their verdicts:
+
+    - hard voting: majority of the members' predicted labels
+    - soft voting: argmax of the AVERAGED class probabilities
+
+    Members must implement ``fit`` and ``predict``; soft voting additionally
+    requires ``predict_proba`` returning columns in the member's sorted class
+    order (an observable ``classes_`` attribute is used to remap columns when
+    a member declares it — e.g. a basket of scratch and sklearn models).
+
+    Parameters:
+        estimators: List of (name, estimator-template) tuples; templates are
+            deep-copied at fit time so each member trains from scratch state
+        voting: 'hard' or 'soft'
+
+    Attributes after fit:
+        classes_: Sorted unique class labels seen across training
+        member_names_: The member names, in declaration order
+        estimators_: The fitted member models, in declaration order
+        named_estimators_: dict name -> fitted member
+    """
+
+    def __init__(
+        self,
+        estimators: Optional[list] = None,
+        voting: str = "hard",
+    ):
+        self.estimators = estimators
+        self.voting = voting
+
+    def _vote_matrix(self, X: np.ndarray) -> np.ndarray:
+        """
+        Tally every member's hard votes into a (n_samples, n_classes) matrix.
+
+        Label values outside ``classes_`` are a member contract violation —
+        raised loudly rather than silently mis-bucketed by searchsorted.
+        """
+        votes = np.zeros((len(X), len(self.classes_)))
+        for name, est in zip(self.member_names_, self.estimators_):
+            labels = np.asarray(est.predict(X))
+            if not np.isin(labels, self.classes_).all():
+                raise ValueError(
+                    f"member '{name}' predicted labels outside the ensemble's "
+                    f"classes_ {self.classes_.tolist()}: "
+                    f"{sorted(set(labels) - set(self.classes_.tolist()))}"
+                )
+            columns = np.searchsorted(self.classes_, labels)
+            np.add.at(votes, (np.arange(len(X)), columns), 1.0)
+        return votes
+
+    def _proba_matrix(self, X: np.ndarray) -> np.ndarray:
+        """Average every member's probabilities into one (n, C) matrix."""
+        avg = np.zeros((len(X), len(self.classes_)))
+        for name, est in zip(self.member_names_, self.estimators_):
+            proba = np.asarray(est.predict_proba(X), dtype=float)
+            member_classes = getattr(est, "classes_", self.classes_)
+            if proba.shape[0] != len(X) or proba.shape[1] != len(member_classes):
+                raise ValueError(
+                    f"member '{name}' returned proba shaped {proba.shape}; "
+                    f"expected ({len(X)}, {len(member_classes)})"
+                )
+            for col, value in enumerate(member_classes):
+                pos = int(np.searchsorted(self.classes_, value))
+                avg[:, pos] += proba[:, col]
+        return avg / len(self.estimators_)
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "VotingEnsembleClassifierScratch":
+        """
+        Fit every member on fresh copies of the template estimators.
+
+        Parameters:
+            X: Training features of shape (n_samples, n_features)
+            y: Class labels of shape (n_samples,)
+
+        Returns:
+            self
+        """
+        if not self.estimators:
+            raise ValueError(
+                "estimators must be a non-empty list of (name, estimator) tuples"
+            )
+        if any(not isinstance(name, str) for name, _ in self.estimators):
+            raise ValueError("every estimator must be given a string name")
+        if len({name for name, _ in self.estimators}) != len(self.estimators):
+            raise ValueError("duplicate member names are not allowed")
+        if self.voting not in ("hard", "soft"):
+            raise ValueError(
+                f"voting must be 'hard' or 'soft'; got {self.voting!r}"
+            )
+        if self.voting == "soft" and any(
+            not hasattr(est, "predict_proba") for _, est in self.estimators
+        ):
+            raise ValueError(
+                "soft voting requires every member to implement predict_proba"
+            )
+
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y)
+        self.classes_ = np.unique(y)
+        self.member_names_ = tuple(name for name, _ in self.estimators)
+
+        # deep-copy the (unfitted) templates: each member trains its own state
+        self.estimators_ = [deepcopy(est).fit(X, y) for _, est in self.estimators]
+        self.named_estimators_ = dict(zip(self.member_names_, self.estimators_))
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Predict class labels by hard or soft voting.
+
+        Parameters:
+            X: Features of shape (n_samples, n_features)
+
+        Returns:
+            Predicted class labels of shape (n_samples,)
+        """
+        X = np.asarray(X, dtype=float)
+        if self.voting == "hard":
+            votes = self._vote_matrix(X)
+        else:
+            votes = self._proba_matrix(X)
+        # argmax takes the FIRST max: vote/probability ties resolve to the
+        # lowest class index (the same order-dependent rule sklearn uses)
+        return self.classes_[votes.argmax(axis=1)]
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """
+        Class probabilities as the members' averaged probabilities.
+
+        Only meaningful for voting='soft' — hard-voting ensembles have no
+        probability model (the votes themselves are the raw material).
+
+        Parameters:
+            X: Features of shape (n_samples, n_features)
+
+        Returns:
+            Averaged probabilities of shape (n_samples, n_classes)
+        """
+        X = np.asarray(X, dtype=float)
+        return self._proba_matrix(X)
+
+    def score(self, X: np.ndarray, y: np.ndarray) -> float:
+        """Accuracy on the given data."""
+        return float(np.mean(self.predict(X) == np.asarray(y)))

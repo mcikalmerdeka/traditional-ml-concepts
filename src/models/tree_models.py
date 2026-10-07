@@ -17,7 +17,10 @@ class Node:
         threshold: Threshold value for the split
         left: Left child node
         right: Right child node
-        value: Prediction value (for leaf nodes)
+        value: Prediction value (class index for classifier leaves, mean
+            target for regressor leaves)
+        proba: Per-leaf class fractions (classifier leaves only; None for
+            regressor and split nodes)
     """
     
     def __init__(
@@ -26,13 +29,15 @@ class Node:
         threshold: Optional[float] = None,
         left: Optional['Node'] = None,
         right: Optional['Node'] = None,
-        value: Optional[float] = None
+        value: Optional[float] = None,
+        proba: Optional[np.ndarray] = None
     ):
         self.feature = feature
         self.threshold = threshold
         self.left = left
         self.right = right
         self.value = value
+        self.proba = proba
     
     def is_leaf(self) -> bool:
         """Check if node is a leaf node."""
@@ -43,7 +48,12 @@ class DecisionTreeClassifierScratch:
     """
     Decision Tree Classifier implementation from scratch.
     
-    Uses Information Gain (based on Entropy) for splitting.
+    Recursively splits on Gini (or entropy) impurity. Leaf nodes store the
+    full class distribution, powering both ``predict`` (majority class) and
+    ``predict_proba`` (fractions).
+    
+    Labels are mapped to contiguous indices internally (``classes_`` sorted),
+    so non-contiguous or string-coercible labels work like sklearn's trees.
     """
     
     def __init__(
@@ -68,6 +78,7 @@ class DecisionTreeClassifierScratch:
         self.criterion = criterion
         self.root = None
         self.n_classes_ = None
+        self.classes_ = None
     
     def _entropy(self, y: np.ndarray) -> float:
         """Calculate entropy of a node."""
@@ -147,6 +158,11 @@ class DecisionTreeClassifierScratch:
         
         return best_feature, best_threshold, best_gain
     
+    def _leaf(self, y: np.ndarray) -> Node:
+        """Create a leaf holding the majority class index and class fractions."""
+        counts = np.bincount(y, minlength=self.n_classes_)
+        return Node(value=int(np.argmax(counts)), proba=counts / len(y))
+
     def _build_tree(self, X: np.ndarray, y: np.ndarray, depth: int = 0) -> Node:
         """Recursively build the decision tree."""
         n_samples, n_features = X.shape
@@ -157,16 +173,14 @@ class DecisionTreeClassifierScratch:
            n_samples < self.min_samples_split or \
            n_classes == 1:
             # Create leaf node
-            leaf_value = np.argmax(np.bincount(y))
-            return Node(value=leaf_value)
+            return self._leaf(y)
         
         # Find best split
         best_feature, best_threshold, best_gain = self._best_split(X, y)
         
         # If no good split found, create leaf
         if best_feature is None or best_gain == 0:
-            leaf_value = np.argmax(np.bincount(y))
-            return Node(value=leaf_value)
+            return self._leaf(y)
         
         # Split data
         left_mask, right_mask = self._split(X, best_threshold, best_feature)
@@ -195,12 +209,16 @@ class DecisionTreeClassifierScratch:
         """
         X = np.asarray(X)
         y = np.asarray(y)
-        self.n_classes_ = len(np.unique(y))
-        self.root = self._build_tree(X, y)
+        # Map arbitrary labels to sorted 0..C-1 indices; leaf logic uses
+        # np.bincount, which only accepts non-negative contiguous integers.
+        self.classes_ = np.unique(y)
+        self.n_classes_ = len(self.classes_)
+        y_idx = np.searchsorted(self.classes_, y)
+        self.root = self._build_tree(X, y_idx)
         return self
     
     def _predict_sample(self, x: np.ndarray, node: Node) -> int:
-        """Predict class for a single sample."""
+        """Predict class index for a single sample (mapped back by predict)."""
         if node.is_leaf():
             return int(node.value)
         
@@ -208,6 +226,16 @@ class DecisionTreeClassifierScratch:
             return self._predict_sample(x, node.left)
         else:
             return self._predict_sample(x, node.right)
+    
+    def _leaf_for_sample(self, x: np.ndarray, node: Node) -> Node:
+        """Return the leaf node a single sample falls into."""
+        if node.is_leaf():
+            return node
+        
+        if x[node.feature] <= node.threshold:
+            return self._leaf_for_sample(x, node.left)
+        else:
+            return self._leaf_for_sample(x, node.right)
     
     def predict(self, X: np.ndarray) -> np.ndarray:
         """
@@ -220,7 +248,25 @@ class DecisionTreeClassifierScratch:
             Predicted class labels of shape (n_samples,)
         """
         X = np.asarray(X)
-        return np.array([self._predict_sample(x, self.root) for x in X])
+        indices = np.array([self._predict_sample(x, self.root) for x in X])
+        return self.classes_[indices]
+    
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """
+        Predict class probabilities as the leaf class fractions.
+        
+        Note: each row is the exact class distribution of the leaf the
+        sample falls into, matching scikit-learn's decision tree.
+        
+        Parameters:
+            X: Features of shape (n_samples, n_features)
+        
+        Returns:
+            Class probabilities of shape (n_samples, n_classes)
+        """
+        X = np.asarray(X)
+        leaves = [self._leaf_for_sample(x, self.root) for x in X]
+        return np.array([leaf.proba for leaf in leaves])
     
     def score(self, X: np.ndarray, y: np.ndarray) -> float:
         """Calculate accuracy score."""
@@ -418,6 +464,34 @@ class DecisionTreeRegressorScratch:
         """
         X = np.asarray(X)
         return np.array([self._predict_sample(x, self.root) for x in X])
+    
+    def apply(self, X: np.ndarray) -> np.ndarray:
+        """
+        Return the leaf Node object each sample falls into.
+        
+        Mirrors scikit-learn's ``tree.apply`` concept, but returns the
+        scratch ``Node`` objects themselves so stage-wise learners (e.g.
+        gradient boosting) can regroup samples per leaf and overwrite the
+        leaf values after fitting.
+        
+        Parameters:
+            X: Features of shape (n_samples, n_features)
+        
+        Returns:
+            Array of leaf Node references of shape (n_samples,)
+        """
+        X = np.asarray(X)
+        return np.array(
+            [self._predict_sample_leaf(x, self.root) for x in X], dtype=object
+        )
+    
+    def _predict_sample_leaf(self, x: np.ndarray, node: Node) -> Node:
+        """Traverse to the leaf for a single sample."""
+        if node.is_leaf():
+            return node
+        if x[node.feature] <= node.threshold:
+            return self._predict_sample_leaf(x, node.left)
+        return self._predict_sample_leaf(x, node.right)
     
     def score(self, X: np.ndarray, y: np.ndarray) -> float:
         """Calculate R² score."""
