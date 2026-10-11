@@ -1,4 +1,4 @@
-"""K-Means card guards: sklearn-only identity + degenerate-combo error path.
+"""K-Means card guards: dual-engine identity + degenerate-combo error path.
 
 AppTest cannot deliver a hyperparameter value outside a widget's declared
 bounds (streamlit 1.65 validates widget values on render — a pre-run
@@ -23,10 +23,12 @@ from app.registry.discovery import get_card
 SMOKE_RUNNER = str(ROOT / "tests" / "app" / "smoke_runner.py")
 
 
-def test_kmeans_card_is_sklearn_only():
+def test_kmeans_card_is_dual_engine():
+    # upgraded from the slice-3 sklearn-only placeholder once KMeansScratch
+    # landed in src/models (scratch twin covered by the generic contract suite)
     card = get_card("kmeans")
-    assert card.sklearn_only is True
-    assert card.sources == ()
+    assert card.sklearn_only is False
+    assert card.sources
 
 
 def test_degenerate_k_raises_at_engine_layer():

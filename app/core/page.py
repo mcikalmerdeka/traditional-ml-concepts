@@ -79,15 +79,17 @@ def _render_code_section(card: AlgorithmCard) -> None:
 @st.fragment
 def _playground(card: AlgorithmCard) -> None:
     st.markdown("## Playground")
+    # hypers first: the dataset list depends on the variant select
+    # (card.datasets_for), so the selectbox must see resolved params
+    params = render_hypers(card)
     dataset_id = st.sidebar.selectbox(
         "Dataset",
-        list(card.datasets),
+        list(card.datasets_for(params)),
         format_func=lambda s: s.replace("_", " "),
         key=f"{card.id}::dataset",
     )
     data = get_dataset(dataset_id)
     st.sidebar.caption(data.note)
-    params = render_hypers(card)
 
     engines = ["sklearn"] if card.sklearn_only else ["scratch", "sklearn"]
     fitteds: dict[str, object] = {}

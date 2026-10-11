@@ -9,17 +9,16 @@ import streamlit as st
 from app.core.page import render_card
 from app.registry.discovery import discover_cards
 
-# Landing copy (cleanup minor #8): describes both page kinds honestly —
-# 4 of 14 cards run scratch + sklearn side by side; the other 10 run
-# scikit-learn alone until their scratch twin lands in src/models/.
+# Landing copy (updated once every card runs both engines): describe the
+# dual-engine playground honestly — every algorithm page wires its scratch
+# twin from src/models against scikit-learn.
 LANDING_INTRO = (
     "Pick an algorithm from the sidebar to open its study page: the core "
     "mathematics, a playground where toy datasets plus hyperparameter "
-    "sliders re-run the fits. Some algorithms run *your* implementation and "
-    "scikit-learn side by side — watch where the two engines agree and "
+    "sliders re-run the fits. Every page runs a from-scratch implementation "
+    "and scikit-learn side by side — watch where the two engines agree and "
     "where they diverge: that gap is where hyperparameter understanding "
-    "lives. The rest run scikit-learn alone until their scratch twin lands "
-    "in `src/models/`. The **Compare** page puts every algorithm's headline "
+    "lives. The **Compare** page puts every algorithm's headline "
     "metric in one table per family; **Quick Reference** is a cheat-sheet "
     "over all cards."
 )

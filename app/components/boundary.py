@@ -19,7 +19,10 @@ def decision_boundary(
     x0 = np.linspace(X[:, 0].min() - 0.5, X[:, 0].max() + 0.5, resolution)
     x1 = np.linspace(X[:, 1].min() - 0.5, X[:, 1].max() + 0.5, resolution)
     grid = np.array([[a, b] for a in x0 for b in x1])
-    Z = np.array([predict_fn(row[None, :])[0] for row in grid]).reshape(len(x0), len(x1))
+    # single batched call: every predict the app feeds here (sklearn + the
+    # scratch twins) accepts (n, d), and per-row looping multiplied scratch
+    # forest costs ~17x to run the identical contour
+    Z = np.asarray(predict_fn(grid), dtype=float).reshape(len(x0), len(x1))
 
     fig.add_trace(
         go.Contour(

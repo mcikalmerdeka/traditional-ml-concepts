@@ -18,10 +18,18 @@ def test_engines_and_hypers_cells_match_card_declarations():
     logistic = get_card("logistic-regression")
     assert engines_label(logistic) == "scratch + sklearn"
     svm = get_card("svm")
-    assert engines_label(svm) == "sklearn only"
+    # upgraded from the slice-3 sklearn-only placeholder to dual-engine
+    assert engines_label(svm) == "scratch + sklearn"
+
+
+def test_variant_card_reference_row_reads_the_default_variant():
+    # variant cards route playground datasets; the reference table shows the
+    # static card.datasets (the CLASSIFIER default) so the row stays honest
     rf = get_card("random-forest")
-    assert hypers_label(rf) == "n_estimators=100, max_depth=5"
+    assert hypers_label(rf) == (
+        "algorithm=classifier, n_estimators=100, max_depth=5"
+    )
     row = {r["page"]: r for r in reference_rows(ALL)}["random-forest"]
     assert row["card"] == "Random Forest"
-    assert row["hypers"] == "n_estimators=100, max_depth=5"
+    assert row["hypers"] == "algorithm=classifier, n_estimators=100, max_depth=5"
     assert row["datasets"] == "moons, circles, blobs_noisy"

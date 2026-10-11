@@ -1,8 +1,9 @@
-"""Card: Hierarchical Clustering (sklearn-only — no from-scratch implementation exists yet).
+"""Card: Hierarchical Clustering.
 
-When AgglomerativeClusteringScratch lands in src/models/clustering_models.py,
-this card upgrades to dual-engine by adding a sources entry and a scratch
-branch in fit.
+Dual-engine: from-scratch AgglomerativeClusteringScratch (bottom-up merging
+with ward/complete/average/single Lance-Williams updates) vs sklearn's
+AgglomerativeClustering — both expose labels_ only, so the playground shows
+per-engine scatter panels and a per-engine silhouette-vs-k sweep.
 
 Agglomerative merging: start with every point as its own cluster and merge
 the two closest clusters repeatedly. The linkage rule defines what "closest
@@ -16,6 +17,7 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import silhouette_score
 
 from app.core.card import AlgorithmCard, Select, Slider
+from src.models.clustering_models import AgglomerativeClusteringScratch
 
 THEORY = """## Theory
 
@@ -46,6 +48,11 @@ the k the hierarchy itself prefers.
 
 
 def fit(data, params, engine):
+    if engine == "scratch":
+        return AgglomerativeClusteringScratch(
+            n_clusters=params["n_clusters"],
+            linkage=params["linkage"],
+        ).fit(data.X)
     # AgglomerativeClustering has no random_state — pass nothing extra
     return AgglomerativeClustering(
         n_clusters=params["n_clusters"],
@@ -63,26 +70,35 @@ def metrics(fitted, data):
 
 def _scatter_by_label(ctx):
     fig = go.Figure()
-    labels = ctx.sklearn.raw.labels_
-    for k in np.unique(labels):
-        mask = labels == k
-        fig.add_trace(
-            go.Scatter(
-                x=ctx.data.X[mask, 0],
-                y=ctx.data.X[mask, 1],
-                mode="markers",
-                marker=dict(size=6),
-                name=f"cluster {k}",
+    for slot, name, fitted_obj in [
+        ("x", "scratch", ctx.scratch),
+        ("x2", "sklearn", ctx.sklearn),
+    ]:
+        labels = fitted_obj.raw.labels_
+        for k in np.unique(labels):
+            mask = labels == k
+            fig.add_trace(
+                go.Scatter(
+                    x=ctx.data.X[mask, 0],
+                    y=ctx.data.X[mask, 1],
+                    xaxis=slot,
+                    yaxis="y",
+                    mode="markers",
+                    marker=dict(size=6),
+                    name=f"{name} cluster {k}",
+                )
             )
-        )
     fig.update_layout(
         title=(
             f"Clusters at k={ctx.params['n_clusters']}, "
-            f"linkage={ctx.params['linkage']} — no centroids, no predict"
+            f"linkage={ctx.params['linkage']} — no centroids, no predict — "
+            "scratch (left) vs sklearn (right)"
         ),
         template="plotly_white",
-        xaxis_title="x₀",
-        yaxis_title="x₁",
+        xaxis=dict(domain=[0.0, 0.45], anchor="y"),
+        yaxis=dict(domain=[0.0, 1.0]),
+        xaxis2=dict(domain=[0.55, 1.0], anchor="y2"),
+        yaxis2=dict(domain=[0.0, 1.0]),
     )
     return fig
 
@@ -92,27 +108,32 @@ def _silhouette_vs_k(ctx):
     # "current k" marker never vanishes inside the slider's bounds
     # (cleanup minor #6)
     ks = list(range(2, 11))
-    scores = []
-    for k in ks:
-        # module-level fit returns the RAW model (run() adds the Fitted wrap)
-        raw = fit(ctx.data, dict(ctx.params, n_clusters=k), "sklearn")
-        labels = raw.labels_
-        if len(set(labels)) >= 2:
-            scores.append(float(silhouette_score(ctx.data.X, labels)))
-        else:
-            scores.append(float("nan"))
+    fig = go.Figure()
+    for name, color, fitted_cls in [
+        ("scratch", "#EF553B", AgglomerativeClusteringScratch),
+        ("sklearn", "#636EFA", AgglomerativeClustering),
+    ]:
+        scores = []
+        for k in ks:
+            raw = fitted_cls(
+                n_clusters=k, linkage=ctx.params["linkage"]
+            ).fit(ctx.data.X)
+            labels = raw.labels_
+            if len(set(labels)) >= 2:
+                scores.append(float(silhouette_score(ctx.data.X, labels)))
+            else:
+                scores.append(float("nan"))
+        fig.add_trace(
+            go.Scatter(
+                x=ks,
+                y=scores,
+                mode="lines+markers",
+                name=f"{name} silhouette",
+                line=dict(color=color, width=2),
+            )
+        )
     current = ctx.params["n_clusters"]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=ks,
-            y=scores,
-            mode="lines+markers",
-            name="silhouette",
-            line=dict(color="#636EFA", width=2),
-        )
-    )
     if 2 <= current <= 10:
         fig.add_trace(
             go.Scatter(
@@ -138,8 +159,7 @@ card = AlgorithmCard(
     family="clustering",
     when_to_use="a full merge hierarchy you can cut at any k — linkage choice is the lesson",
     theory=THEORY,
-    sources=(),
-    sklearn_only=True,
+    sources=(("src/models/clustering_models.py", ("AgglomerativeClusteringScratch",)),),
     hypers=(
         Select("linkage", ("ward", "average", "complete", "single"), "ward"),
         Slider("n_clusters", 2, 10, 1, 4),
@@ -157,5 +177,8 @@ card = AlgorithmCard(
         "`var_blobs` try ward: k=3 is the truth",
         "drag k and watch the marker ride the silhouette line: no centroid "
         "moves here, only the hierarchy cut does",
+        "scratch's ward uses the Lance-Williams variance update while "
+        "sklearn's invokes its own — partitions agree on blobs, watch them "
+        "diverge on `var_blobs`' tail points",
     ),
 )

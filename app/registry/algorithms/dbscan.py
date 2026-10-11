@@ -1,7 +1,9 @@
-"""Card: DBSCAN (sklearn-only — no from-scratch implementation exists yet).
+"""Card: DBSCAN.
 
-When DBSCANScratch lands in src/models/clustering_models.py, this card
-upgrades to dual-engine by adding a sources entry and a scratch branch in fit.
+Dual-engine: from-scratch DBSCANScratch (grid-free density reachability) vs
+sklearn's DBSCAN — both label rows, mark -1 noise and expose labels_, so the
+playground shows per-engine scatter panels and a per-engine clusters-vs-eps
+sweep.
 
 DBSCAN needs no k: eps (neighborhood radius) and min_samples (core-point
 threshold) ARE the model. Its slider bounds deliberately include the
@@ -15,6 +17,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.metrics import silhouette_score
 
 from app.core.card import AlgorithmCard, Slider
+from src.models.clustering_models import DBSCANScratch
 
 THEORY = """## Theory
 
@@ -40,6 +43,10 @@ K-Means cannot fix).
 
 
 def fit(data, params, engine):
+    if engine == "scratch":
+        return DBSCANScratch(eps=params["eps"], min_samples=params["min_samples"]).fit(
+            data.X
+        )
     # DBSCAN has no random_state parameter — pass nothing extra
     return DBSCAN(eps=params["eps"], min_samples=params["min_samples"]).fit(data.X)
 
@@ -56,9 +63,8 @@ def metrics(fitted, data):
     if n_clusters >= 2:
         # silhouette on non-noise rows only: scattered noise must not pose
         # as a pseudo "-1 cluster" (basis matches the sibling clustering
-        # pages). mask.sum() > n_clusters keeps sklearn's 2 <= n_labels <
-        # n_samples precondition — the all-singleton-clusters edge would
-        # otherwise raise.
+        # pages). mask.sum() > n_clusters keeps sklearn's 2 <= n_labels < n_samples
+        # precondition — the all-singleton-clusters edge would otherwise raise.
         mask = labels != -1
         if mask.sum() > n_clusters:
             values.append(("Silhouette", float(silhouette_score(data.X[mask], labels[mask]))))
@@ -67,37 +73,48 @@ def metrics(fitted, data):
 
 def _scatter_by_label(ctx):
     fig = go.Figure()
-    labels = ctx.sklearn.raw.labels_
-    for k in np.unique(labels):
-        mask = labels == k
-        if k == -1:
-            fig.add_trace(
-                go.Scatter(
-                    x=ctx.data.X[mask, 0],
-                    y=ctx.data.X[mask, 1],
-                    mode="markers",
-                    marker=dict(size=6, color="gray", symbol="x"),
-                    name="noise",
+    for slot, name, fitted_obj in [
+        ("x", "scratch", ctx.scratch),
+        ("x2", "sklearn", ctx.sklearn),
+    ]:
+        labels = fitted_obj.raw.labels_
+        for k in np.unique(labels):
+            mask = labels == k
+            if k == -1:
+                fig.add_trace(
+                    go.Scatter(
+                        x=ctx.data.X[mask, 0],
+                        y=ctx.data.X[mask, 1],
+                        xaxis=slot,
+                        yaxis="y",
+                        mode="markers",
+                        marker=dict(size=6, color="gray", symbol="x"),
+                        name=f"{name} noise",
+                    )
                 )
-            )
-        else:
-            fig.add_trace(
-                go.Scatter(
-                    x=ctx.data.X[mask, 0],
-                    y=ctx.data.X[mask, 1],
-                    mode="markers",
-                    marker=dict(size=6),
-                    name=f"cluster {k}",
+            else:
+                fig.add_trace(
+                    go.Scatter(
+                        x=ctx.data.X[mask, 0],
+                        y=ctx.data.X[mask, 1],
+                        xaxis=slot,
+                        yaxis="y",
+                        mode="markers",
+                        marker=dict(size=6),
+                        name=f"{name} cluster {k}",
+                    )
                 )
-            )
     fig.update_layout(
         title=(
             f"Density clusters — eps={ctx.params['eps']}, "
-            f"min_samples={ctx.params['min_samples']} (gray × = noise)"
+            f"min_samples={ctx.params['min_samples']} (gray × = noise) — "
+            "scratch (left) vs sklearn (right)"
         ),
         template="plotly_white",
-        xaxis_title="x₀",
-        yaxis_title="x₁",
+        xaxis=dict(domain=[0.0, 0.45], anchor="y"),
+        yaxis=dict(domain=[0.0, 1.0]),
+        xaxis2=dict(domain=[0.55, 1.0], anchor="y2"),
+        yaxis2=dict(domain=[0.0, 1.0]),
     )
     return fig
 
@@ -105,27 +122,33 @@ def _scatter_by_label(ctx):
 def _clusters_vs_eps(ctx):
     # sweep eps at the current min_samples; the marker rides the count line
     eps_values = list(np.arange(0.1, 3.05, 0.05))
-    counts = []
-    for eps in eps_values:
-        raw = fit(ctx.data, dict(ctx.params, eps=eps), "sklearn")
-        labels = raw.labels_
-        counts.append(float(len(set(labels)) - (1 if -1 in labels else 0)))
+    fig = go.Figure()
+    counts_by_name = {}
+    for name, color, fitted_cls in [
+        ("scratch", "#EF553B", DBSCANScratch),
+        ("sklearn", "#636EFA", DBSCAN),
+    ]:
+        counts = []
+        for eps in eps_values:
+            raw = fitted_cls(min_samples=ctx.params["min_samples"], eps=eps).fit(ctx.data.X)
+            labels = raw.labels_
+            counts.append(float(len(set(labels)) - (1 if -1 in labels else 0)))
+        counts_by_name[name] = counts
+        fig.add_trace(
+            go.Scatter(
+                x=eps_values,
+                y=counts,
+                mode="lines+markers",
+                name=f"{name} clusters",
+                line=dict(color=color, width=2),
+            )
+        )
     current = ctx.params["eps"]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=eps_values,
-            y=counts,
-            mode="lines+markers",
-            name="clusters",
-            line=dict(color="#636EFA", width=2),
-        )
-    )
     fig.add_trace(
         go.Scatter(
             x=[current],
-            y=[counts[int(round((current - 0.1) / 0.05))]],
+            y=[counts_by_name["sklearn"][int(round((current - 0.1) / 0.05))]],
             mode="markers",
             marker=dict(size=14, color="red"),
             name="current eps",
@@ -146,8 +169,7 @@ card = AlgorithmCard(
     family="clustering",
     when_to_use="clusters of any shape with real noise handling — no k, only density",
     theory=THEORY,
-    sources=(),
-    sklearn_only=True,
+    sources=(("src/models/clustering_models.py", ("DBSCANScratch",)),),
     hypers=(
         Slider("eps", 0.1, 3.0, 0.05, 0.5, "neighborhood radius"),
         Slider("min_samples", 2, 20, 1, 5, "core-point threshold"),

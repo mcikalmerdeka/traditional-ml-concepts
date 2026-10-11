@@ -1,10 +1,10 @@
-"""Card: PCA (sklearn-only — no from-scratch implementation exists yet).
-
-When PCAScratch lands in src/models/dimensionality_reduction.py, this card
-upgrades to dual-engine by adding a sources entry and a scratch branch in fit.
+"""Card: PCA — dual-engine (PCAScratch vs sklearn PCA).
 
 Family "dimensionality-reduction": engines.run() wraps the fit with
-kind="transform", so the projection viz flows through Fitted.transform.
+kind="transform", so the projection viz flows through Fitted.transform. The
+scratch eigendecomposition resolves the same principal directions up to
+sign, so projections agree up to flips — the explained-variance bars agree
+exactly.
 """
 
 import numpy as np
@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 from sklearn.decomposition import PCA
 
 from app.core.card import AlgorithmCard, Slider
+from src.models.dimensionality_reduction import PCAScratch
 
 THEORY = """## Theory
 
@@ -39,6 +40,8 @@ visibly more than half the variance — a real compression, not a truncation.
 
 
 def fit(data, params, engine):
+    if engine == "scratch":
+        return PCAScratch(n_components=params["n_components"]).fit(data.X)
     return PCA(n_components=params["n_components"], random_state=0).fit(data.X)
 
 
@@ -54,24 +57,33 @@ def metrics(fitted, data):
 
 
 def _projection(ctx):
-    proj = ctx.sklearn.transform(ctx.data.X)  # kind="transform" — never predict
-    k = proj.shape[1]
-    y = proj[:, 1] if k > 1 else np.zeros(len(proj))
-    fig = go.Figure(
-        go.Scatter(
-            x=proj[:, 0],
-            y=y,
-            mode="markers",
-            marker=dict(size=6, color="#636EFA"),
-            name="rows",
+    fig = go.Figure()
+    for slot, name, fitted_obj, color in [
+        ("x", "scratch", ctx.scratch, "#EF553B"),
+        ("x2", "sklearn", ctx.sklearn, "#636EFA"),
+    ]:
+        proj = fitted_obj.transform(ctx.data.X)  # kind="transform" — never predict
+        k = proj.shape[1]
+        y = proj[:, 1] if k > 1 else np.zeros(len(proj))
+        fig.add_trace(
+            go.Scatter(
+                x=proj[:, 0],
+                y=y,
+                xaxis=slot,
+                yaxis="y",
+                mode="markers",
+                marker=dict(size=6, color=color),
+                name=name,
+            )
         )
-    )
-    title = "Projection (PC1 × PC2)" if k > 1 else "Projection (PC1 — k=1 collapses onto one axis)"
     fig.update_layout(
-        title=title,
+        title="Projection (PC1 × PC2) — scratch (left) vs sklearn (right); "
+              "sign flips of an eigenvector are free",
         template="plotly_white",
-        xaxis_title="PC1",
-        yaxis_title="PC2" if k > 1 else "—",
+        xaxis=dict(domain=[0.0, 0.45], anchor="y"),
+        yaxis=dict(domain=[0.0, 1.0]),
+        xaxis2=dict(domain=[0.55, 1.0], anchor="y2"),
+        yaxis2=dict(domain=[0.0, 1.0]),
     )
     return fig
 
@@ -79,31 +91,35 @@ def _projection(ctx):
 def _explained_variance_ratio(ctx):
     # bar heights never move: ratios are dataset properties; the slider
     # (marker) only chooses the cut point of the cumulative line
-    raw = fit(ctx.data, dict(ctx.params, n_components=len(ctx.data.X[0])), "sklearn")
-    ratios = raw.explained_variance_ratio_
-    ks = list(range(1, len(ratios) + 1))
-    cumulative = list(np.cumsum(ratios))
-    current = ctx.params["n_components"]
-
     fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=ks,
-            y=ratios,
-            name="per-component ratio",
-            marker_color="#636EFA",
+    for name, color, fitted_cls in [
+        ("scratch", "#EF553B", PCAScratch),
+        ("sklearn", "#636EFA", PCA),
+    ]:
+        raw = fitted_cls(n_components=ctx.data.X.shape[1]).fit(ctx.data.X)
+        ratios = raw.explained_variance_ratio_
+        ks = list(range(1, len(ratios) + 1))
+        cumulative = list(np.cumsum(ratios))
+        fig.add_trace(
+            go.Bar(
+                x=ks,
+                y=ratios,
+                name=f"{name} per-component ratio",
+                marker_color=color,
+                opacity=0.6,
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=ks,
-            y=cumulative,
-            mode="lines+markers",
-            name="cumulative",
-            line=dict(color="#EF553B", width=2),
+        fig.add_trace(
+            go.Scatter(
+                x=ks,
+                y=cumulative,
+                mode="lines+markers",
+                name=f"{name} cumulative",
+                line=dict(color=color, width=2),
+            )
         )
-    )
-    if 1 <= current <= len(ks):
+    current = ctx.params["n_components"]
+    if 1 <= current <= ctx.data.X.shape[1]:
         fig.add_trace(
             go.Scatter(
                 x=[current],
@@ -128,8 +144,7 @@ card = AlgorithmCard(
     family="dimensionality-reduction",
     when_to_use="compressing correlated features onto their spread directions — explained variance is the lesson",
     theory=THEORY,
-    sources=(),
-    sklearn_only=True,
+    sources=(("src/models/dimensionality_reduction.py", ("PCAScratch",)),),
     hypers=(
         Slider("n_components", 1, 4, 1, 2),
     ),
@@ -140,9 +155,9 @@ card = AlgorithmCard(
     notes=(
         "k=2 keeps most of four features' information — that is compression",
         "drag k to 1: the projection collapses onto one axis",
+        "the two engines' projections can mirror each other in sign — an "
+        "eigenvector's sign is arbitrary; explained variance never disagrees",
         "the bar heights never move — ratios are dataset properties, the "
         "slider only moves the marker",
-        "compression = few components with most of the cumulative line: read "
-        "the red marker, not the bar",
     ),
 )

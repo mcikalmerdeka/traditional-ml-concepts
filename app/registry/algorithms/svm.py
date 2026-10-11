@@ -1,7 +1,8 @@
-"""Card: Support Vector Machine (sklearn-only — no from-scratch implementation exists yet).
+"""Card: Support Vector Machine.
 
-When SVMScratch lands in src/models/svm_models.py, this card upgrades to
-dual-engine by adding a sources entry and a scratch branch in fit.
+Dual-engine: from-scratch SVMClassifierScratch (simplified-SMO kernel dual)
+vs sklearn's SVC. The playground shows per-engine decision boundaries and
+the training/test accuracy-vs-C curves that expose the margin tradeoff.
 
 The playground makes two tradeoffs visible: C (margin width vs violations)
 and gamma (how island-like the RBF regions become).
@@ -14,6 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 
 from app.core.card import AlgorithmCard, Select, Slider
+from src.models.svm_models import SVMClassifierScratch
 
 THEORY = r"""## Theory
 
@@ -45,6 +47,13 @@ matter how large C is — geometry beats capacity.
 
 
 def fit(data, params, engine):
+    if engine == "scratch":
+        return SVMClassifierScratch(
+            C=params["C"],
+            kernel=params["kernel"],
+            gamma=params["gamma"],
+            random_state=0,
+        ).fit(data.X, data.y)
     return SVC(
         kernel=params["kernel"],
         C=params["C"],
@@ -58,18 +67,31 @@ def metrics(fitted, data):
     return [("Accuracy", float(accuracy_score(data.y, pred)))]
 
 
-def _boundary(ctx):
+def _boundaries(ctx):
     from app.components.boundary import decision_boundary
     from app.components.scatter import labeled_scatter
 
-    fig = labeled_scatter(ctx.data.X, ctx.data.y, "data")
-    decision_boundary(fig, ctx.sklearn.predict, ctx.data.X, "svm", card.grid_resolution)
+    n = card.grid_resolution
+    scratch_fig = labeled_scatter(ctx.data.X, ctx.data.y, "scratch")
+    decision_boundary(scratch_fig, ctx.scratch.predict, ctx.data.X, "scratch", n)
+    sklearn_fig = labeled_scatter(ctx.data.X, ctx.data.y, "sklearn")
+    decision_boundary(sklearn_fig, ctx.sklearn.predict, ctx.data.X, "sklearn", n)
+
+    fig = go.Figure()
+    fig.add_traces([t.update(xaxis="x", yaxis="y") for t in scratch_fig.data])
+    fig.add_traces([t.update(xaxis="x2", yaxis="y2") for t in sklearn_fig.data])
     fig.update_layout(
         title=(
             f"SVM decision regions — kernel={ctx.params['kernel']}, "
-            f"C={ctx.params['C']}, γ={ctx.params['gamma']}"
+            f"C={ctx.params['C']}, γ={ctx.params['gamma']} — "
+            "scratch (left) vs sklearn (right)"
         ),
         template="plotly_white",
+        xaxis=dict(domain=[0.0, 0.45], anchor="y"),
+        yaxis=dict(domain=[0.0, 1.0]),
+        xaxis2=dict(domain=[0.55, 1.0], anchor="y2"),
+        yaxis2=dict(domain=[0.0, 1.0]),
+        showlegend=False,
     )
     return fig
 
@@ -82,28 +104,30 @@ def _accuracy_vs_c(ctx):
     )
     sub = type(ctx.data)(X=Xtr, y=ytr, note="", family=ctx.data.family)
     cs = list(np.geomspace(0.01, 10.0, 20))
-    train_acc = []
-    test_acc = []
+    curves = {name: {"train": [], "test": []} for name in ("scratch", "sklearn")}
     for c in cs:
-        fitted = fit(sub, dict(ctx.params, C=c), "sklearn")
-        train_acc.append(float(accuracy_score(ytr, fitted.predict(Xtr))))
-        test_acc.append(float(accuracy_score(yte, fitted.predict(Xte))))
+        for name in curves:
+            fitted = fit(sub, dict(ctx.params, C=c), name)
+            curves[name]["train"].append(float(accuracy_score(ytr, fitted.predict(Xtr))))
+            curves[name]["test"].append(float(accuracy_score(yte, fitted.predict(Xte))))
 
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=cs, y=train_acc, mode="lines+markers",
-            name="train", line=dict(color="#EF553B", width=2),
+    for name, color in [("scratch", "#EF553B"), ("sklearn", "#636EFA")]:
+        fig.add_trace(
+            go.Scatter(
+                x=cs, y=curves[name]["train"], mode="lines+markers",
+                name=f"{name} train", line=dict(color=color, width=2),
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=cs, y=test_acc, mode="lines+markers",
-            name="test", line=dict(color="#636EFA", width=2),
+        fig.add_trace(
+            go.Scatter(
+                x=cs, y=curves[name]["test"], mode="lines+markers",
+                name=f"{name} test", line=dict(color=color, dash="dot", width=2),
+            )
         )
-    )
     fig.update_xaxes(type="log", title="C")
-    fig.update_yaxes(title="accuracy", range=[min(0.5, min(test_acc) - 0.05), 1.02])
+    floor = min(min(curves[name]["test"]) for name in curves)
+    fig.update_yaxes(title="accuracy", range=[min(0.5, floor - 0.05), 1.02])
     fig.update_layout(
         title=(
             "Accuracy vs C — small C: wide margin underfits; large C: "
@@ -120,8 +144,7 @@ card = AlgorithmCard(
     family="classification",
     when_to_use="maximum-margin boundaries up to kernel-shaped geometry — C vs gamma is the lesson",
     theory=THEORY,
-    sources=(),
-    sklearn_only=True,
+    sources=(("src/models/svm_models.py", ("SVMClassifierScratch",)),),
     hypers=(
         Select("kernel", ("linear", "rbf", "poly"), "rbf", "map to feature space"),
         Slider("C", 0.01, 10.0, 0.01, 1.0),
@@ -130,7 +153,7 @@ card = AlgorithmCard(
     datasets=("moons", "circles", "blobs_noisy"),
     fit=fit,
     metrics=metrics,
-    visualizations=(_boundary, _accuracy_vs_c),
+    visualizations=(_boundaries, _accuracy_vs_c),
     notes=(
         "C small → wide margin, more train errors tolerated on the "
         "overlapping `blobs noisy` rows",
@@ -139,5 +162,8 @@ card = AlgorithmCard(
         "linear kernel cannot bend around `circles` — geometry beats capacity",
         "swap kernel rbf ↔ linear while watching the C sweep: linear barely "
         "moves, rbf's test curve climbs then flattens",
+        "the scratch simplified-SMO pays for large C on the un-separated "
+        "`blobs noisy` rows — a slow fit is the honest cost of the exact "
+        "margin solver it approximates",
     ),
 )

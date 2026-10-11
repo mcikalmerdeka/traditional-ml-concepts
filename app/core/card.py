@@ -108,6 +108,26 @@ class AlgorithmCard:
     grid_resolution: int = 40  # classifier meshgrid resolution (heavy scratch
                                # learners lower this — see boundary.py)
     sklearn_only: bool = False
+    # variant-aware dataset routing: cards with an "algorithm" variant select
+    # map each variant to ONLY the datasets it can learn from (a classifier
+    # variant cannot train on the continuous-y regression toys — Gini's
+    # bincount cannot even run; a regressor variant on moons is nonsense).
+    # Empty ⇔ static `datasets` (the contract tests pin this relation).
+    variant_datasets: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    def datasets_for(self, params: dict) -> tuple[str, ...]:
+        """Dataset ids usable for the current parameter values.
+
+        Falls back to the static `datasets` when no variant route matches —
+        unknown variants and cards without variants both see the full list.
+        """
+        if not self.variant_datasets:
+            return self.datasets
+        variant = params.get("algorithm")
+        for name, datasets in self.variant_datasets:
+            if name == variant:
+                return datasets
+        return self.datasets
 
     def validate(self) -> None:
         """Fail fast on malformed cards — contract tests run this on every card."""
